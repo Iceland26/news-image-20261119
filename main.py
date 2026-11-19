@@ -353,12 +353,16 @@ def _gC(P):
 
 
 def _gD(P):
+    """D = stem + top/bottom bars + a right-half arc band whose ends
+    land inside the bars (v3's full bowl bulged left of the stem and
+    left a hairline gap where its ring passed the stem's inner face)."""
     sx = _sx(P)
-    cxb = sx + 130
     cs = _stem(sx, 0, CAPU, P)
-    cs.append(_rect(sx - P['S'] / 2, CAPU - P['T'], cxb + 90, CAPU))
-    cs.append(_rect(sx - P['S'] / 2, 0, cxb + 90, P['T']))
-    cs += _bowl(cxb, 340, 612 - 56 - cxb, 347, P)
+    cx = sx + P['S'] * 0.9
+    rx = 556 - cx
+    cs.append(_rect(sx - P['S'] / 2, CAPU - P['T'], cx + rx * 0.45, CAPU))
+    cs.append(_rect(sx - P['S'] / 2, 0, cx + rx * 0.45, P['T']))
+    cs += _band(cx, 340, rx, 340, P['BV'], P['BH'], -90, 90)
     return 612, cs
 
 
@@ -505,8 +509,14 @@ def _gT(P):
 
 
 def _gU(P):
-    cs = _stem(88, 200, CAPU, P, top=True, bot=False)
-    cs += _stem(538, 200, CAPU, P, top=True, bot=False)
+    """Stems sit on the bowl stroke's centreline (inset BV/2 from the
+    bowl's outer tangents) and run down into the bowl, so the union
+    has no step where stem meets curve (v3 centred the stems on the
+    band endpoints: flat stem bottoms notched the counter)."""
+    lx = 88 + P['BV'] / 2.0
+    rx = 538 - P['BV'] / 2.0
+    cs = _stem(lx, 130, CAPU, P, top=True, bot=False)
+    cs += _stem(rx, 130, CAPU, P, top=True, bot=False)
     cs += _band(313, 200, 225, 200, P['BV'], P['BH'], 180, 360)
     return 626, cs
 
