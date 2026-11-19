@@ -561,9 +561,13 @@ def _gZ(P):
 
 
 def _ga(P):
+    """Double-story a. The bowls use explicit thinner strokes than
+    _bowl's clamp allows: with the face BV the small top bowl's
+    counter collapsed to a slit and the glyph read as a capped
+    single-story form."""
     sx = 500 - 52 - P['SW'] - P['S'] / 2.0
-    cs = _bowl(240, 372, 178, 112, P)
-    cs += _bowl(246, 172, 208, 180, P)
+    cs = _band(242, 378, 180, 130, P['BV'] * 0.72, P['BH'] * 0.92, 0, 360)
+    cs += _band(244, 170, 204, 178, P['BV'] * 0.78, P['BH'] * 0.95, 0, 360)
     cs += _stem(sx, 0, XHU, P)
     return 500, cs
 
@@ -604,21 +608,24 @@ def _ge(P):
 
 
 def _gf(P):
-    """'f': one contour — stem whose top bends right into a hook."""
+    """'f': one contour — stem rising to 500, then a hook whose inner
+    return stays clear of the stem face, so the head counter stays
+    open in the bold cut (v3's return hugged the stem and the head
+    filled in, reading as a long s)."""
     cx = 118.0
     S = P['S']
     x0, x1 = cx - S / 2.0, cx + S / 2.0
-    pts = [(x0, 0), (x1, 0), (x1, 460)]
-    pts += _bez((x1, 460), (x1 + 6, 580), (x1 + 48, 648), (x1 + 98, 648),
+    pts = [(x0, 0), (x1, 0), (x1, 500)]
+    pts += _bez((x1, 500), (x1 + 2, 610), (x1 + 58, 668), (x1 + 118, 660),
                 12)[1:]
-    pts += _bez((x1 + 98, 648), (x1 + 118, 648), (x1 + 112, 596),
-                (x1 + 100, 552), 8)[1:]
-    pts += _bez((x1 + 100, 552), (x1 + 40, 500), (x0 + 28, 452),
-                (x0, 428), 10)[1:]
+    pts += _bez((x1 + 118, 660), (x1 + 140, 656), (x1 + 138, 622),
+                (x1 + 128, 600), 8)[1:]
+    pts += _bez((x1 + 128, 600), (x1 + 70, 545), (x0 + 58, 520),
+                (x0, 462), 10)[1:]
     cs = [_O(pts)]
     cs += _foot(cx, P)
-    cs.append(_rect(38, 380, 268, 380 + P['T']))
-    return 300, cs
+    cs.append(_rect(x0 - 26, 392, x1 + 84, 392 + P['T']))
+    return 350, cs
 
 
 def _gg(P):
@@ -707,10 +714,14 @@ def _gq(P):
 
 
 def _gr(P):
+    """'r': stem + a compact shoulder arc springing from the stem's
+    top (v3's wide 134-degree band read as a flag on a pole)."""
     sx = _sx(P)
     cs = _stem(sx, 0, XHU, P, top=True, bot=True)
-    cs += _band(205, 315, 148, 168, P['BV'], P['BH'], -42, 92)
-    return 360, cs
+    cs += _band(sx + 112, 330, 112, 150, P['BV'] * 0.94, P['BH'], -28, 95)
+    if P['SER']:
+        cs.append(_rect(sx + 196, 428, sx + 252, 428 + P['T'] * 0.8))
+    return 385, cs
 
 
 def _gs(P):
