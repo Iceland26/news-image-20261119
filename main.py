@@ -2,17 +2,23 @@
 """news-image-20261119 — "THE WORLD TODAY": one image that sums up the world
 news of Wednesday 19 November 2026, drawn entirely in code.
 
-Pure Python 3 standard library. A small vector stroke typeface, a scanline
-rasteriser with 2x supersampling, and a hand-rolled PNG encoder render a
-newspaper front page: masthead, date bar, market ticker, a lead story with a
-dot-grid world map, a numbers rail, four top stories and briefs grids for
-world, planet, society, Asia-Pacific, economy and sport — 30+ real stories
-of the day, every one of them reported on 19 November 2026.
+Pure Python 3 standard library — no PIL, no font files. The type is a
+constructed filled-glyph system: every letter is built from bars, diagonals
+and ring segments on a 7-unit cap grid, in three weights (regular, bold, and
+a slab-footed display cut for the masthead). A scanline rasteriser with 2x
+supersampling and a hand-rolled PNG encoder do the rest.
+
+The page mirrors a broadsheet front page: utility bar, date block and
+masthead, a strap line, region tally chips, a four-number stat band, nine
+numbered story cards with small drawn illustration strips, a 24-story
+"also" column strip, and a date-check footer. 33 real stories of the day,
+every one of them reported on 19 November 2026.
 
 Deterministic: no randomness, no clock, no network. Two runs write the same
 bytes. Output: $MAKEFUN_OUTPUT_DIR/entry.png (default /output/entry.png).
 """
 
+import math
 import os
 import struct
 import zlib
@@ -84,7 +90,7 @@ class Canvas:
             self.disc(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, r, col)
 
     def poly(self, pts, col):
-        """Filled polygon, output coordinates (scanline)."""
+        """Filled polygon, output coordinates (scanline, even-odd)."""
         P = [(x * SS, y * SS) for x, y in pts]
         ys = [p[1] for p in P]
         y0, y1 = int(min(ys)), int(max(ys))
@@ -115,431 +121,675 @@ class Canvas:
         return bytes(out)
 
 # --------------------------------------------------------------------------
-# Stroke typeface. Glyphs live on a 7-unit cap height, y down, baseline y=7.
-# Each glyph: (width, [stroke, ...]); a stroke is a list of (x, y) points.
-# A stroke of the form ("poly", pts) is a filled polygon (for triangles).
+# Constructed filled-glyph typeface.
+#
+# Glyph space: y UP, baseline y=0, cap height 7, x-height 4.9, descender -2.
+# Each glyph is (advance, [primitive, ...]); primitives are built around a
+# centreline and take their thickness from the weight's stem width S:
+#   ('V', x, y0, y1, feet)  vertical bar; feet is '' or any of 'b','t'
+#                           (slab feet are drawn only in the display cut)
+#   ('H', y, x0, x1)        horizontal bar
+#   ('D', x0, y0, x1, y1)   diagonal bar, flat caps
+#   ('A', cx, cy, rx, ry, start_deg, sweep_deg)  ring segment (sweep may be
+#                           negative for clockwise); 357 deg = closed ring
+#   ('C', cx, cy, r)        filled disc
+#   ('P', [(x, y), ...])    filled polygon
 # --------------------------------------------------------------------------
 
-def _s(*pts):
-    return list(pts)
+def _star(cx, cy, r_out, r_in):
+    pts = []
+    for i in range(10):
+        r = r_out if i % 2 == 0 else r_in
+        a = math.radians(90 + i * 36)
+        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return pts
 
 GLYPHS = {
-    'A': (4.5, [_s((0, 7), (2.25, 0), (4.5, 7)), _s((1.05, 4.7), (3.45, 4.7))]),
-    'B': (4.3, [_s((0, 0), (0, 7)), _s((0, 0), (2.4, 0), (3.2, 0.9), (3.2, 2.3), (2.4, 3.3), (0, 3.3)),
-                _s((0, 3.3), (2.6, 3.3), (3.4, 4.3), (3.4, 5.9), (2.5, 7), (0, 7))]),
-    'C': (4.4, [_s((4.3, 1.3), (3.2, 0.2), (1.6, 0), (0.6, 0.9), (0.2, 2.2), (0.2, 4.8),
-                  (0.6, 6.1), (1.6, 7), (3.2, 6.8), (4.3, 5.7))]),
-    'D': (4.5, [_s((0, 0), (0, 7)), _s((0, 0), (2.7, 0), (3.9, 1.3), (4.4, 3.5), (3.9, 5.7), (2.7, 7), (0, 7))]),
-    'E': (3.9, [_s((3.9, 0), (0, 0), (0, 7), (3.9, 7)), _s((0, 3.5), (3.1, 3.5))]),
-    'F': (3.7, [_s((3.7, 0), (0, 0), (0, 7)), _s((0, 3.5), (2.9, 3.5))]),
-    'G': (4.6, [_s((4.3, 1.3), (3.2, 0.2), (1.6, 0), (0.6, 0.9), (0.2, 2.2), (0.2, 4.8),
-                  (0.6, 6.1), (1.6, 7), (3.3, 6.8), (4.4, 5.9), (4.4, 3.9), (2.7, 3.9))]),
-    'H': (4.5, [_s((0, 0), (0, 7)), _s((4.5, 0), (4.5, 7)), _s((0, 3.5), (4.5, 3.5))]),
-    'I': (1.7, [_s((0.85, 0), (0.85, 7)), _s((0, 0), (1.7, 0)), _s((0, 7), (1.7, 7))]),
-    'J': (3.4, [_s((3.4, 0), (3.4, 5.3), (2.8, 6.6), (1.4, 7), (0.4, 6.2), (0.2, 5))]),
-    'K': (4.3, [_s((0, 0), (0, 7)), _s((4.2, 0), (0.5, 3.5)), _s((1.7, 2.5), (4.3, 7))]),
-    'L': (3.7, [_s((0, 0), (0, 7), (3.7, 7))]),
-    'M': (5.4, [_s((0, 7), (0, 0), (2.7, 3.6), (5.4, 0), (5.4, 7))]),
-    'N': (4.6, [_s((0, 7), (0, 0), (4.6, 7), (4.6, 0))]),
-    'O': (4.6, [_s((2.3, 0), (3.8, 0.5), (4.5, 2), (4.6, 3.5), (4.5, 5), (3.8, 6.5),
-                  (2.3, 7), (0.8, 6.5), (0.1, 5), (0, 3.5), (0.1, 2), (0.8, 0.5), (2.3, 0))]),
-    'P': (4.2, [_s((0, 7), (0, 0), (2.9, 0), (3.9, 0.9), (3.9, 2.6), (2.9, 3.5), (0, 3.5))]),
-    'Q': (4.6, [_s((2.3, 0), (3.8, 0.5), (4.5, 2), (4.6, 3.5), (4.5, 5), (3.8, 6.5),
-                  (2.3, 7), (0.8, 6.5), (0.1, 5), (0, 3.5), (0.1, 2), (0.8, 0.5), (2.3, 0)),
-                _s((2.8, 5.1), (4.8, 7.5))]),
-    'R': (4.3, [_s((0, 7), (0, 0), (2.9, 0), (3.9, 0.9), (3.9, 2.6), (2.9, 3.5), (0, 3.5)),
-                _s((2.1, 3.5), (4.3, 7))]),
-    'S': (4.1, [_s((4, 1.2), (3, 0.1), (1.4, 0), (0.4, 0.9), (0.3, 2), (1.1, 2.9), (3, 3.6),
-                  (3.9, 4.5), (3.8, 5.9), (2.9, 6.9), (1.2, 7), (0.2, 6))]),
-    'T': (4.2, [_s((0, 0), (4.2, 0)), _s((2.1, 0), (2.1, 7))]),
-    'U': (4.5, [_s((0, 0), (0, 4.7), (0.6, 6.3), (1.6, 7), (2.9, 7), (3.9, 6.3), (4.5, 4.7), (4.5, 0))]),
-    'V': (4.5, [_s((0, 0), (2.25, 7), (4.5, 0))]),
-    'W': (6.1, [_s((0, 0), (1.35, 7), (3.05, 2.7), (4.75, 7), (6.1, 0))]),
-    'X': (4.2, [_s((0, 0), (4.2, 7)), _s((4.2, 0), (0, 7))]),
-    'Y': (4.3, [_s((0, 0), (2.15, 3.3), (4.3, 0)), _s((2.15, 3.3), (2.15, 7))]),
-    'Z': (4.2, [_s((0, 0), (4.2, 0), (0, 7), (4.2, 7))]),
-    '0': (4.2, [_s((2.1, 0), (3.4, 0.5), (4.1, 2), (4.2, 3.5), (4.1, 5), (3.4, 6.5),
-                  (2.1, 7), (0.8, 6.5), (0.1, 5), (0, 3.5), (0.1, 2), (0.8, 0.5), (2.1, 0))]),
-    '1': (3.2, [_s((0.9, 1.5), (2.1, 0), (2.1, 7)), _s((0.7, 7), (3.1, 7))]),
-    '2': (4.1, [_s((0.3, 1.3), (1, 0.2), (2.6, 0), (3.7, 0.9), (3.6, 2.2), (0.2, 7), (4, 7))]),
-    '3': (4.1, [_s((0.4, 0.9), (1.4, 0), (2.8, 0.1), (3.6, 1.1), (3.3, 2.4), (2.1, 3.2)),
-                _s((2.1, 3.2), (3.4, 3.9), (3.7, 5.4), (2.9, 6.7), (1.4, 7), (0.3, 6.1))]),
-    '4': (4.4, [_s((2.9, 7), (2.9, 0), (0, 4.9), (4.4, 4.9))]),
-    '5': (4.0, [_s((3.9, 0), (0.2, 0), (0.2, 3.1), (2.2, 2.8), (3.6, 3.8), (3.8, 5.4),
-                  (2.9, 6.8), (1.2, 7), (0.2, 6.2))]),
-    '6': (4.1, [_s((3.7, 1.1), (2.5, 0), (1.1, 0.9), (0.3, 3.2), (0.2, 5), (0.9, 6.6),
-                  (2.2, 7), (3.4, 6.3), (3.8, 5), (3.3, 3.7), (2, 3.3), (0.6, 3.9))]),
-    '7': (4.1, [_s((0.2, 0), (4.1, 0), (1.7, 7))]),
-    '8': (4.1, [_s((2.05, 3.3), (1, 2.9), (0.4, 1.9), (0.7, 0.7), (1.9, 0), (3.2, 0.5),
-                  (3.6, 1.6), (3.1, 2.8), (2.05, 3.3)),
-                _s((2.05, 3.3), (0.9, 3.9), (0.3, 5.2), (0.9, 6.5), (2.05, 7), (3.2, 6.5),
-                  (3.8, 5.2), (3.2, 3.9), (2.05, 3.3))]),
-    '9': (4.1, [_s((0.4, 6), (1.6, 7), (3, 6.1), (3.8, 3.8), (3.9, 2), (3.1, 0.4),
-                  (1.7, 0), (0.4, 0.7), (0.2, 2.1), (0.8, 3.3), (2.1, 3.7), (3.5, 3.1))]),
-    '.': (1.6, [_s((0.8, 6.5), (0.8, 6.9))]),
-    ',': (1.6, [_s((1.05, 6.1), (0.75, 7.7))]),
-    "'": (1.6, [_s((0.8, 0.1), (0.8, 1.7))]),
-    '\u2019': (1.6, [_s((0.8, 0.1), (0.8, 1.7))]),
-    '"': (3.0, [_s((0.7, 0.1), (0.7, 1.7)), _s((2.2, 0.1), (2.2, 1.7))]),
-    '-': (3.0, [_s((0.3, 3.5), (2.7, 3.5))]),
-    '\u2013': (3.6, [_s((0.3, 3.5), (3.3, 3.5))]),
-    '\u2014': (4.8, [_s((0.2, 3.5), (4.6, 3.5))]),
-    ':': (1.6, [_s((0.8, 2), (0.8, 2.4)), _s((0.8, 5.4), (0.8, 5.8))]),
-    ';': (1.6, [_s((0.8, 2), (0.8, 2.4)), _s((1.05, 6.1), (0.75, 7.7))]),
-    '!': (1.6, [_s((0.8, 0), (0.8, 4.7)), _s((0.8, 6.5), (0.8, 6.9))]),
-    '?': (3.9, [_s((0.4, 1.2), (1.2, 0.1), (2.7, 0), (3.5, 0.9), (3.3, 2.3), (2, 3.5), (2, 4.7)),
-                _s((2, 6.5), (2, 6.9))]),
-    '$': (4.1, [_s((4, 1.2), (3, 0.1), (1.4, 0), (0.4, 0.9), (0.3, 2), (1.1, 2.9), (3, 3.6),
-                  (3.9, 4.5), (3.8, 5.9), (2.9, 6.9), (1.2, 7), (0.2, 6)),
-                _s((2.05, -0.5), (2.05, 7.5))]),
-    '%': (5.8, [_s((1.15, 0.15), (2, 0.6), (2.15, 1.6), (1.6, 2.5), (0.6, 2.3), (0.15, 1.4), (1.15, 0.15)),
-                _s((4.7, 0), (1.1, 7)),
-                _s((4.65, 4.5), (5.5, 4.95), (5.65, 5.95), (5.1, 6.85), (4.1, 6.65), (3.65, 5.75), (4.65, 4.5))]),
-    '(': (2.8, [_s((2.4, 0.4), (1.2, 1.6), (0.7, 3.5), (1.2, 5.4), (2.4, 6.6))]),
-    ')': (2.8, [_s((0.4, 0.4), (1.6, 1.6), (2.1, 3.5), (1.6, 5.4), (0.4, 6.6))]),
-    '/': (3.4, [_s((3.4, -0.2), (0, 7.2))]),
-    '+': (4.0, [_s((2, 1.7), (2, 5.3)), _s((0.2, 3.5), (3.8, 3.5))]),
-    '=': (3.8, [_s((0.2, 2.6), (3.6, 2.6)), _s((0.2, 4.6), (3.6, 4.6))]),
-    '\u00b7': (1.6, [_s((0.8, 3.4), (0.8, 3.8))]),
-    '\u2026': (4.6, [_s((0.7, 6.5), (0.7, 6.9)), _s((2.3, 6.5), (2.3, 6.9)), _s((3.9, 6.5), (3.9, 6.9))]),
-    '\u00b0': (2.6, [_s((1.3, 0.1), (2.2, 0.6), (2.4, 1.5), (1.9, 2.4), (1, 2.5), (0.35, 1.8), (0.45, 0.7), (1.3, 0.1))]),
-    '\u25b2': (4.0, [("poly", [(2, 0.7), (3.9, 6.3), (0.1, 6.3)])]),
-    '\u25bc': (4.0, [("poly", [(2, 6.3), (3.9, 0.7), (0.1, 0.7)])]),
-    '&': (4.4, [_s((3.4, 0.7), (2.2, 1.9), (0.9, 3.4), (0.5, 4.9), (1.1, 6.4), (2.4, 7),
-                   (3.5, 6.4)), _s((1.7, 3.6), (3.9, 6.9))]),
-    ' ': (2.6, []),
+    # ---- capitals -------------------------------------------------------
+    'A': (5.5, [('D', 0.35, 0, 2.75, 7), ('D', 5.15, 0, 2.75, 7),
+                ('H', 2.35, 1.5, 4.0)]),
+    'B': (5.3, [('V', 0.6, 0, 7, 'bt'), ('H', 7, 0.6, 3.7),
+                ('H', 3.42, 0.6, 4.0), ('H', 0, 0.6, 4.0),
+                ('A', 2.45, 5.21, 2.0, 1.79, -88, 176),
+                ('A', 2.45, 1.71, 2.15, 1.71, -88, 176)]),
+    'C': (5.5, [('A', 2.95, 3.5, 2.6, 3.5, 48, 264)]),
+    'D': (5.7, [('V', 0.6, 0, 7, 'bt'), ('H', 7, 0.6, 3.4),
+                ('H', 0, 0.6, 3.4), ('A', 2.35, 3.5, 2.95, 3.5, -87, 174)]),
+    'E': (4.9, [('V', 0.6, 0, 7, 'bt'), ('H', 7, 0.6, 4.55),
+                ('H', 3.5, 0.6, 3.95), ('H', 0, 0.6, 4.55)]),
+    'F': (4.7, [('V', 0.6, 0, 7, 'bt'), ('H', 7, 0.6, 4.45),
+                ('H', 3.6, 0.6, 3.7)]),
+    'G': (5.7, [('A', 2.95, 3.5, 2.6, 3.5, 50, 262),
+                ('H', 2.55, 3.1, 5.45), ('V', 5.15, 0, 2.55, '')]),
+    'H': (5.7, [('V', 0.6, 0, 7, 'bt'), ('V', 5.1, 0, 7, 'bt'),
+                ('H', 3.5, 0.6, 5.1)]),
+    'I': (1.7, [('V', 0.85, 0, 7, 'bt')]),
+    'J': (4.3, [('V', 3.7, 1.75, 7, 't'),
+                ('A', 2.05, 1.75, 1.65, 1.75, 180, 175)]),
+    'K': (5.3, [('V', 0.6, 0, 7, 'bt'), ('D', 4.95, 7, 1.75, 3.1),
+                ('D', 2.05, 2.8, 5.15, 0)]),
+    'L': (4.7, [('V', 0.6, 0, 7, 'bt'), ('H', 0, 0.6, 4.55)]),
+    'M': (6.6, [('V', 0.6, 0, 7, 'bt'), ('V', 6.0, 0, 7, 'bt'),
+                ('D', 0.6, 7, 3.3, 2.7), ('D', 6.0, 7, 3.3, 2.7)]),
+    'N': (5.9, [('V', 0.6, 0, 7, 'bt'), ('V', 5.3, 0, 7, 'bt'),
+                ('D', 0.6, 7, 5.3, 0)]),
+    'O': (5.9, [('A', 2.95, 3.5, 2.95, 3.5, 0, 357)]),
+    'P': (5.3, [('V', 0.6, 0, 7, 'bt'), ('H', 7, 0.6, 3.7),
+                ('H', 3.3, 0.6, 3.9),
+                ('A', 2.45, 5.15, 2.0, 1.85, -88, 176)]),
+    'Q': (5.9, [('A', 2.95, 3.5, 2.95, 3.5, 0, 357),
+                ('D', 3.5, 1.3, 5.75, -0.5)]),
+    'R': (5.3, [('V', 0.6, 0, 7, 'bt'), ('H', 7, 0.6, 3.7),
+                ('H', 3.3, 0.6, 3.9),
+                ('A', 2.45, 5.15, 2.0, 1.85, -88, 176),
+                ('D', 2.8, 3.3, 5.15, 0)]),
+    'S': (5.1, [('A', 2.55, 5.0, 2.0, 2.0, 32, 190),
+                ('A', 2.55, 2.05, 2.15, 2.05, 130, -288)]),
+    'T': (5.3, [('H', 7, 0.15, 5.15), ('V', 2.65, 0, 7, 'b')]),
+    'U': (5.7, [('V', 0.6, 1.95, 7, 't'), ('V', 5.1, 1.95, 7, 't'),
+                ('A', 2.85, 1.95, 2.25, 1.95, 180, 180)]),
+    'V': (5.5, [('D', 0.25, 7, 2.75, 0), ('D', 5.25, 7, 2.75, 0)]),
+    'W': (7.3, [('D', 0.25, 7, 1.8, 0), ('D', 1.8, 0, 3.65, 5.4),
+                ('D', 3.65, 5.4, 5.5, 0), ('D', 5.5, 0, 7.05, 7)]),
+    'X': (5.3, [('D', 0.35, 7, 4.95, 0), ('D', 0.35, 0, 4.95, 7)]),
+    'Y': (5.5, [('D', 0.25, 7, 2.75, 3.3), ('D', 5.25, 7, 2.75, 3.3),
+                ('V', 2.75, 0, 3.3, 'b')]),
+    'Z': (5.1, [('H', 7, 0.25, 4.85), ('D', 4.85, 7, 0.25, 0),
+                ('H', 0, 0.25, 4.85)]),
+    # ---- lowercase ------------------------------------------------------
+    'a': (4.7, [('A', 2.4, 2.45, 2.0, 2.45, 0, 357),
+                ('V', 4.4, 0, 4.9, ''), ('H', 4.9, 1.3, 4.4)]),
+    'b': (4.9, [('V', 0.6, 0, 7, 'bt'),
+                ('A', 2.8, 2.45, 2.0, 2.45, 0, 357)]),
+    'c': (4.5, [('A', 2.4, 2.45, 2.05, 2.45, 50, 262)]),
+    'd': (4.9, [('A', 2.3, 2.45, 2.0, 2.45, 0, 357),
+                ('V', 4.3, 0, 7, 'bt')]),
+    'e': (4.7, [('A', 2.4, 2.45, 2.05, 2.45, 35, 305),
+                ('H', 2.6, 0.55, 4.35)]),
+    'f': (3.1, [('V', 1.15, 0, 6.55, ''),
+                ('A', 2.0, 6.5, 0.9, 0.55, 0, 180),
+                ('H', 3.85, 0.35, 2.95)]),
+    'g': (4.9, [('A', 2.3, 2.45, 2.0, 2.45, 0, 357),
+                ('V', 4.3, -0.8, 4.9, ''),
+                ('A', 2.55, -0.8, 1.75, 0.95, 0, -235)]),
+    'h': (5.0, [('V', 0.6, 0, 7, 'bt'),
+                ('A', 2.85, 2.5, 1.85, 2.4, 175, -210),
+                ('V', 4.62, 0, 2.4, '')]),
+    'i': (1.6, [('V', 0.8, 0, 4.9, 'b'), ('C', 0.8, 6.35, 0.58)]),
+    'j': (2.7, [('V', 2.05, -1.25, 4.9, ''),
+                ('A', 1.0, -1.25, 1.05, 0.78, 0, -165),
+                ('C', 2.05, 6.35, 0.58)]),
+    'k': (4.7, [('V', 0.6, 0, 7, 'bt'), ('D', 4.35, 4.9, 1.8, 2.3),
+                ('D', 2.05, 2.05, 4.55, 0)]),
+    'l': (1.6, [('V', 0.8, 0, 7, 'bt')]),
+    'm': (7.7, [('V', 0.6, 0, 4.9, 'b'),
+                ('A', 2.4, 2.5, 1.6, 2.4, 175, -210),
+                ('V', 3.98, 0, 2.4, ''),
+                ('A', 5.78, 2.5, 1.6, 2.4, 175, -210),
+                ('V', 7.35, 0, 2.4, '')]),
+    'n': (5.0, [('V', 0.6, 0, 4.9, 'b'),
+                ('A', 2.85, 2.5, 1.85, 2.4, 175, -210),
+                ('V', 4.62, 0, 2.4, '')]),
+    'o': (4.8, [('A', 2.4, 2.45, 2.05, 2.45, 0, 357)]),
+    'p': (4.9, [('V', 0.6, -2.0, 4.9, 't'),
+                ('A', 2.8, 2.45, 2.0, 2.45, 0, 357)]),
+    'q': (4.9, [('A', 2.3, 2.45, 2.0, 2.45, 0, 357),
+                ('V', 4.3, -2.0, 4.9, 't')]),
+    'r': (3.5, [('V', 0.6, 0, 4.9, 'b'),
+                ('A', 2.15, 3.4, 1.55, 1.5, 175, -215)]),
+    's': (4.3, [('A', 2.15, 3.6, 1.7, 1.3, 32, 190),
+                ('A', 2.15, 1.35, 1.8, 1.35, 130, -288)]),
+    't': (3.3, [('V', 1.55, 0, 6.6, ''), ('H', 3.95, 0.3, 3.05),
+                ('A', 2.4, 0.95, 0.85, 0.95, 180, 155)]),
+    'u': (5.0, [('V', 0.6, 2.3, 4.9, 't'),
+                ('A', 2.5, 2.3, 1.9, 2.3, 180, 180),
+                ('V', 4.4, 0, 4.9, 'b')]),
+    'v': (4.7, [('D', 0.25, 4.9, 2.35, 0), ('D', 4.45, 4.9, 2.35, 0)]),
+    'w': (6.5, [('D', 0.25, 4.9, 1.6, 0), ('D', 1.6, 0, 3.25, 3.9),
+                ('D', 3.25, 3.9, 4.9, 0), ('D', 4.9, 0, 6.25, 4.9)]),
+    'x': (4.5, [('D', 0.3, 4.9, 4.2, 0), ('D', 0.3, 0, 4.2, 4.9)]),
+    'y': (4.7, [('D', 0.25, 4.9, 2.35, 1.55), ('D', 4.45, 4.9, 1.0, -2.0)]),
+    'z': (4.5, [('H', 4.9, 0.25, 4.25), ('D', 4.25, 4.9, 0.25, 0),
+                ('H', 0, 0.25, 4.25)]),
+    # ---- digits ---------------------------------------------------------
+    '0': (5.3, [('A', 2.65, 3.5, 2.3, 3.5, 0, 357)]),
+    '1': (4.4, [('D', 1.15, 5.35, 2.55, 7), ('V', 2.55, 0, 7, 'b'),
+                ('H', 0, 0.95, 4.15)]),
+    '2': (5.0, [('A', 2.5, 5.0, 2.05, 2.0, -55, 235),
+                ('D', 3.85, 3.6, 0.45, 0), ('H', 0, 0.3, 4.6)]),
+    '3': (5.0, [('A', 2.35, 5.15, 1.95, 1.85, -75, 215),
+                ('A', 2.35, 2.25, 2.1, 2.25, -105, 215)]),
+    '4': (5.1, [('V', 3.5, 0, 7, ''), ('D', 0.4, 2.5, 3.5, 7),
+                ('H', 2.5, 0.2, 4.9)]),
+    '5': (4.9, [('H', 7, 0.5, 4.45), ('V', 0.6, 4.2, 7, 't'),
+                ('A', 2.45, 2.6, 2.05, 2.6, 115, -215)]),
+    '6': (5.0, [('D', 4.35, 7, 1.5, 2.9),
+                ('A', 2.5, 2.45, 2.05, 2.45, 0, 357)]),
+    '7': (4.9, [('H', 7, 0.3, 4.6), ('D', 4.6, 7, 1.9, 0)]),
+    '8': (5.0, [('A', 2.5, 5.2, 1.8, 1.8, 0, 357),
+                ('A', 2.5, 2.3, 2.05, 2.3, 0, 357)]),
+    '9': (5.0, [('A', 2.5, 4.55, 2.05, 2.45, 0, 357),
+                ('V', 4.5, 1.55, 7, ''),
+                ('A', 2.6, 1.55, 1.9, 1.55, 0, -170)]),
+    # ---- punctuation and symbols ---------------------------------------
+    '.': (1.6, [('C', 0.8, 0.55, 0.6)]),
+    ',': (1.6, [('C', 0.85, 0.75, 0.58), ('D', 1.25, 0.6, 0.55, -0.9)]),
+    "'": (1.5, [('D', 0.95, 7, 0.45, 5.5)]),
+    '\u2019': (1.5, [('D', 0.95, 7, 0.45, 5.5)]),
+    '\u2018': (1.5, [('D', 0.55, 7, 1.05, 5.5)]),
+    '"': (2.6, [('D', 0.85, 7, 0.35, 5.5), ('D', 2.15, 7, 1.65, 5.5)]),
+    '-': (2.8, [('H', 2.5, 0.25, 2.55)]),
+    '\u2013': (3.6, [('H', 2.5, 0.2, 3.4)]),
+    '\u2014': (5.2, [('H', 2.5, 0.15, 5.05)]),
+    ':': (1.6, [('C', 0.8, 0.55, 0.58), ('C', 0.8, 4.7, 0.58)]),
+    ';': (1.6, [('C', 0.85, 4.7, 0.58), ('C', 0.85, 0.75, 0.58),
+                ('D', 1.25, 0.6, 0.55, -0.9)]),
+    '!': (1.6, [('V', 0.8, 1.9, 7, ''), ('C', 0.8, 0.55, 0.6)]),
+    '?': (4.4, [('A', 2.2, 5.15, 1.75, 1.85, -35, 245),
+                ('V', 2.2, 1.85, 3.3, ''), ('C', 2.2, 0.55, 0.6)]),
+    '$': (5.0, [('A', 2.5, 5.0, 1.95, 1.95, 32, 190),
+                ('A', 2.5, 2.05, 2.1, 2.05, 130, -288),
+                ('V', 2.5, -0.5, 7.5, '')]),
+    '%': (7.6, [('A', 1.55, 5.6, 1.15, 1.3, 0, 330),
+                ('A', 6.0, 1.4, 1.15, 1.3, 0, 330),
+                ('D', 6.9, 7, 0.7, 0)]),
+    '&': (5.6, [('A', 2.6, 5.3, 1.45, 1.55, 0, 357),
+                ('A', 2.9, 2.1, 2.25, 2.1, 0, 357),
+                ('D', 1.2, 3.9, 4.9, 0.1)]),
+    '/': (3.2, [('D', 0.55, -0.25, 2.85, 7.25)]),
+    '(': (3.0, [('A', 2.7, 3.5, 2.0, 3.6, 105, 150)]),
+    ')': (3.0, [('A', 0.3, 3.5, 2.0, 3.6, -75, 150)]),
+    '\u00b7': (1.8, [('C', 0.9, 2.6, 0.55)]),
+    '\u2022': (2.2, [('C', 1.1, 3.0, 0.85)]),
+    '\u2191': (4.4, [('V', 2.2, 0, 6.2, ''), ('D', 2.2, 7, 0.5, 4.9),
+                     ('D', 2.2, 7, 3.9, 4.9)]),
+    '\u2193': (4.4, [('V', 2.2, 0.8, 7, ''), ('D', 2.2, 0, 0.5, 2.1),
+                     ('D', 2.2, 0, 3.9, 2.1)]),
+    '\u25b2': (4.6, [('P', [(2.3, 7), (4.5, 0), (0.1, 0)])]),
+    '\u25bc': (4.6, [('P', [(0.1, 7), (4.5, 7), (2.3, 0)])]),
+    '\u2605': (5.4, [('P', _star(2.7, 3.3, 2.9, 1.18))]),
+    '+': (4.4, [('H', 3.3, 0.6, 3.8), ('V', 2.2, 1.4, 5.2, '')]),
+    '=': (4.4, [('H', 4.4, 0.6, 3.8), ('H', 2.2, 0.6, 3.8)]),
+    '\u2026': (4.8, [('C', 0.7, 0.55, 0.55), ('C', 2.4, 0.55, 0.55),
+                     ('C', 4.1, 0.55, 0.55)]),
+    ' ': (2.4, []),
 }
 
-def text_width(s, size, tracking=0.0):
-    """Width in output px of string s at cap-height size (px)."""
+# Weights: name -> (stem width in glyph units, slab feet?)
+WEIGHTS = {
+    'reg': (0.88, False),
+    'bold': (1.14, False),
+    'disp': (1.24, True),
+}
+
+def _glyph(ch):
+    g = GLYPHS.get(ch)
+    if g is None:
+        g = GLYPHS.get(ch.lower()) or GLYPHS['?']
+    return g
+
+def text_width(s, size, weight='reg', tracking=0.0):
+    """Width in output px of string s at cap-height `size` px."""
     u = size / 7.0
     w = 0.0
-    for ch in s.upper():
-        g = GLYPHS.get(ch)
-        w += (g[0] if g else 2.6) * u + tracking
-    return w - (tracking if s else 0)
-
-def draw_text(cv, x, y, s, size, col, weight=1.0, tracking=0.0, align="left"):
-    """Draw s with cap top at y, left edge x (or centred/right per align)."""
-    s = s.upper()
-    w = text_width(s, size, tracking)
-    if align == "center":
-        x -= w / 2
-    elif align == "right":
-        x -= w
-    u = size / 7.0
-    thick = max(0.55, size * 0.115 * weight)
-    cx = x
     for ch in s:
-        g = GLYPHS.get(ch)
-        if g is None:
-            cx += 2.6 * u + tracking
-            continue
-        gw, strokes = g
-        for st in strokes:
-            if st and st[0] == "poly":
-                pts = [(cx + px * u, y + py * u) for px, py in st[1]]
-                cv.poly(pts, col)
-            else:
-                for i in range(len(st) - 1):
-                    cv.line(cx + st[i][0] * u, y + st[i][1] * u,
-                            cx + st[i + 1][0] * u, y + st[i + 1][1] * u, thick, col)
-        cx += gw * u + tracking
+        w += _glyph(ch)[0] * u
+    if len(s) > 1:
+        w += tracking * (len(s) - 1)
     return w
 
-def wrap(s, size, maxw, tracking=0.0):
-    """Greedy word wrap; returns list of lines."""
-    lines, cur = [], ""
-    for word in s.split():
-        trial = (cur + " " + word).strip()
-        if text_width(trial, size, tracking) <= maxw or not cur:
-            cur = trial
-        else:
-            lines.append(cur)
-            cur = word
-    if cur:
+def _draw_prim(cv, prim, ox, oy, u, S, serif, col, adv=9.9):
+    """Draw one primitive. (ox, oy) = pen origin in output px, oy = baseline."""
+    kind = prim[0]
+    if kind == 'V':
+        _, x, y0, y1, feet = prim
+        cx = ox + x * u
+        cv.rect(cx - S * u / 2, oy - y1 * u, S * u, (y1 - y0) * u, col)
+        if serif and feet:
+            fw = min(S + 0.7, adv - 0.1) * u
+            fh = 0.52 * u
+            if 'b' in feet:
+                cv.rect(cx - fw / 2, oy - y0 * u - fh, fw, fh, col)
+            if 't' in feet:
+                cv.rect(cx - fw / 2, oy - y1 * u, fw, fh, col)
+    elif kind == 'H':
+        _, y, x0, x1 = prim
+        cv.rect(ox + x0 * u, oy - (y + S / 2) * u, (x1 - x0) * u, S * u, col)
+    elif kind == 'D':
+        _, x0, y0, x1, y1 = prim
+        dx, dy = x1 - x0, y1 - y0
+        ln = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy / ln * S / 2, dx / ln * S / 2
+        pts = [(ox + (x0 + nx) * u, oy - (y0 + ny) * u),
+               (ox + (x1 + nx) * u, oy - (y1 + ny) * u),
+               (ox + (x1 - nx) * u, oy - (y1 - ny) * u),
+               (ox + (x0 - nx) * u, oy - (y0 - ny) * u)]
+        cv.poly(pts, col)
+    elif kind == 'A':
+        _, cx, cy, rx, ry, start, sweep = prim
+        steps = max(6, int(abs(sweep) / 6.0))
+        irx = max(0.05, rx - S); iry = max(0.05, ry - S)
+        pts = []
+        for i in range(steps + 1):
+            a = math.radians(start + sweep * i / steps)
+            pts.append((ox + (cx + rx * math.cos(a)) * u,
+                        oy - (cy + ry * math.sin(a)) * u))
+        for i in range(steps, -1, -1):
+            a = math.radians(start + sweep * i / steps)
+            pts.append((ox + (cx + irx * math.cos(a)) * u,
+                        oy - (cy + iry * math.sin(a)) * u))
+        cv.poly(pts, col)
+    elif kind == 'C':
+        _, cx, cy, r = prim
+        cv.disc(ox + cx * u, oy - cy * u, r * u, col)
+    elif kind == 'P':
+        pts = [(ox + x * u, oy - y * u) for x, y in prim[1]]
+        cv.poly(pts, col)
+
+def draw_text(cv, x, y_base, s, size, col, weight='reg', tracking=0.0,
+              align='left'):
+    """Draw string s with baseline at y_base (output px). Returns end x."""
+    S, serif = WEIGHTS[weight]
+    u = size / 7.0
+    w = text_width(s, size, weight, tracking)
+    if align == 'center':
+        x -= w / 2
+    elif align == 'right':
+        x -= w
+    pen = x
+    for ch in s:
+        adv, prims = _glyph(ch)
+        for prim in prims:
+            _draw_prim(cv, prim, pen, y_base, u, S, serif, col, adv)
+        pen += adv * u + tracking
+    return pen
+
+def wrap_text(s, size, weight, max_w, tracking=0.0):
+    """Greedy word wrap; honours explicit newlines. Returns list of lines."""
+    lines = []
+    for para in s.split('\n'):
+        words = para.split()
+        if not words:
+            lines.append('')
+            continue
+        cur = words[0]
+        for wd in words[1:]:
+            trial = cur + ' ' + wd
+            if text_width(trial, size, weight, tracking) <= max_w:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = wd
         lines.append(cur)
     return lines
 
-def draw_wrapped(cv, x, y, s, size, col, maxw, leading=1.28, weight=1.0,
-                 tracking=0.0, align="left", max_lines=None):
-    lines = wrap(s, size, maxw, tracking)
-    if max_lines:
-        lines = lines[:max_lines]
-    for i, ln in enumerate(lines):
-        lx = x
-        if align == "center":
-            lx = x + maxw / 2
-        draw_text(cv, lx, y + i * size * leading, ln, size, col, weight, tracking, align)
-    return len(lines) * size * leading
+def draw_block(cv, x, y_top, s, size, col, weight, max_w, leading,
+               tracking=0.0, align='left'):
+    """Wrap and draw a paragraph; y_top is the top of the cap height of the
+    first line. Returns the y just below the last line's baseline."""
+    lines = wrap_text(s, size, weight, max_w, tracking)
+    yb = y_top + size
+    for ln in lines:
+        draw_text(cv, x, yb, ln, size, col, weight, tracking, align)
+        yb += leading
+    return yb - leading
 
 # --------------------------------------------------------------------------
-# Palette
+# Page layout — "THE WORLD TODAY", Wednesday 19 November 2026
 # --------------------------------------------------------------------------
 
 PAPER = (247, 243, 233)
-PAPER_D = (238, 231, 214)
-INK = (20, 21, 26)
-INK_SOFT = (52, 54, 60)
-GREY = (110, 112, 118)
-RULE = (196, 188, 168)
-RED = (176, 32, 24)
-BLUE = (27, 74, 130)
-GOLD = (178, 128, 20)
-PANEL = (240, 234, 219)
-PANEL_BLUE = (233, 237, 240)
-WHITE = (252, 250, 245)
+CARD = (255, 253, 244)
+INK = (23, 32, 42)
+INK2 = (52, 50, 44)
+GREY = (110, 102, 88)
+HAIR = (203, 195, 172)
+RED = (176, 42, 36)
+WHITE = (255, 255, 255)
 
-M = 34                      # page margin
-CW = W - 2 * M              # content width
+REG_EUROPE = (61, 84, 120)
+REG_AMERICAS = (156, 56, 72)
+REG_ASIA = (31, 122, 109)
+REG_MIDEAST = (166, 118, 43)
+REG_AFRICA = (109, 76, 65)
+REG_OCEANIA = (74, 124, 155)
+REG_WORLD = (91, 117, 83)
+REG_SPORT = (34, 110, 52)
 
-# --------------------------------------------------------------------------
-# Motifs
-# --------------------------------------------------------------------------
+MX = 12                 # page margin
+CW = W - 2 * MX         # content width = 1000
 
-# Dot-grid world map: (row, first col, last col) land spans, 44 x 18 grid.
-MAP_SPANS = [
-    (1, 3, 9), (1, 21, 35),
-    (2, 2, 10), (2, 19, 23), (2, 25, 38),
-    (3, 2, 10), (3, 19, 24), (3, 26, 37), (3, 39, 39),
-    (4, 3, 10), (4, 19, 23), (4, 26, 36), (4, 38, 39),
-    (5, 3, 9), (5, 19, 22), (5, 25, 35), (5, 37, 38),
-    (6, 3, 8), (6, 19, 26), (6, 28, 34),
-    (7, 5, 7), (7, 19, 26), (7, 28, 30), (7, 32, 34),
-    (8, 6, 7), (8, 20, 25), (8, 31, 33),
-    (9, 9, 11), (9, 20, 25), (9, 32, 35),
-    (10, 9, 12), (10, 20, 24), (10, 33, 35),
-    (11, 10, 12), (11, 21, 24),
-    (12, 10, 13), (12, 21, 24), (12, 34, 37),
-    (13, 10, 12), (13, 22, 24), (13, 34, 38),
-    (14, 10, 12), (14, 22, 23), (14, 35, 37),
-    (15, 10, 11),
-    (16, 10, 11),
-]
-
-def draw_map(cv, x, y, w, col=INK_SOFT, hot=RED):
-    cols, rows = 44, 18
-    step = w / cols
-    r = step * 0.30
-    land = set()
-    for row, a, b in MAP_SPANS:
-        for c in range(a, b + 1):
-            land.add((row, c))
-    for (row, c) in land:
-        cv.disc(x + (c + 0.5) * step, y + (row + 0.5) * step, r, col)
-    # Story hotspots: Shenzhen, Kyiv, Gaza/Hormuz, Riyadh, Washington, Hobart
-    for (row, c) in [(6, 33), (3, 24), (6, 26), (7, 26), (5, 5), (14, 38)]:
-        cv.disc(x + (c + 0.5) * step, y + (row + 0.5) * step, r * 1.9, hot)
-    return rows * step
-
-def hrule(cv, x, y, w, thick, col=INK):
+def hline(cv, x, y, w, col=HAIR, thick=1.0):
     cv.rect(x, y, w, thick, col)
 
-def section_head(cv, x, y, w, label, col=INK):
-    cv.rect(x, y, w, 21, col)
-    draw_text(cv, x + 8, y + 4.5, label, 12.5, WHITE, weight=1.15, tracking=1.2)
-    return y + 21
+# ---- card illustration strips (flat shapes only) -------------------------
 
+def art_skyline(cv, x, y, w, h):
+    cv.rect(x, y, w, h, (24, 52, 66))
+    cv.disc(x + w - 52, y + 15, 9, (240, 200, 120))
+    base = y + h
+    for bx, bw, bh in ((6, 34, 24), (46, 26, 33), (78, 40, 20), (124, 30, 38),
+                       (160, 44, 26), (210, 28, 35), (244, 38, 22),
+                       (288, 30, 30)):
+        cv.rect(x + bx, base - bh, bw, bh, (13, 30, 40))
+    for wx, wy in ((56, 22), (64, 28), (134, 16), (142, 24), (220, 20),
+                   (252, 26), (296, 22), (16, 30), (92, 28), (176, 30)):
+        cv.rect(x + wx, base - wy, 2.4, 3.2, (240, 214, 140))
+    for px, col in ((70, (198, 52, 44)), (150, (52, 92, 178)),
+                    (232, (232, 176, 64))):
+        cv.rect(x + px, y + 8, 2, 12, (220, 220, 210))
+        cv.poly([(x + px + 2, y + 8), (x + px + 13, y + 11),
+                 (x + px + 2, y + 14)], col)
 
-def brief(cv, x, y, w, headline, size=13.0, col=INK):
-    """A headline-only brief; returns height used."""
-    return draw_wrapped(cv, x, y, headline, size, col, w, leading=1.22, weight=1.08)
+def art_sea(cv, x, y, w, h):
+    cv.rect(x, y, w, h, (18, 42, 64))
+    for r in range(3):
+        for i in range(10):
+            cv.rect(x + 12 + i * 32 + (r % 2) * 14, y + 9 + r * 12, 13, 2.4,
+                    (110, 160, 195))
+    cv.rect(x + 100, y + h - 12, 128, 7, (148, 158, 168))
+    cv.rect(x + 118, y + h - 18, 30, 6, (148, 158, 168))
+    cv.rect(x + 192, y + h - 21, 15, 9, (200, 208, 216))
+    cv.rect(x + 204, y + h - 26, 3, 14, (148, 158, 168))
+    pts = [(x + 272 + px, y + 18 + py) for px, py in _star(0, 0, 11, 4.2)]
+    cv.poly(pts, (240, 130, 40))
 
-def story(cv, x, y, w, head, deck, hsize=19, dsize=12):
-    """Headline + short deck; returns height used."""
-    hh = draw_wrapped(cv, x, y, head, hsize, INK, w, leading=1.15, weight=1.3)
-    dh = draw_wrapped(cv, x, y + hh + 2, deck, dsize, INK_SOFT, w,
-                      leading=1.25, weight=0.9)
-    return hh + 2 + dh
+def art_chart(cv, x, y, w, h):
+    cv.rect(x, y, w, h, (16, 52, 44))
+    base = y + h - 6
+    for i, bh in enumerate((10, 15, 13, 21, 27)):
+        cv.rect(x + 60 + i * 34, base - bh, 22, bh, (46, 160, 130))
+    cv.rect(x + 60 + 5 * 34, base - 36, 22, 36, (240, 130, 40))
+    cv.poly([(x + 52, y + 26), (x + 218, y + 8), (x + 206, y + 6),
+             (x + 222, y + 2), (x + 224, y + 16), (x + 220, y + 5),
+             (x + 66, y + 30)], (235, 240, 235))
 
-# --------------------------------------------------------------------------
-# The page
-# --------------------------------------------------------------------------
+def art_scales(cv, x, y, w, h):
+    cv.rect(x, y, w, h, (38, 48, 58))
+    gold = (206, 172, 92)
+    cx = x + w / 2
+    cv.rect(cx - 2, y + 10, 4, h - 16, gold)
+    cv.rect(cx - 62, y + 12, 124, 4, gold)
+    cv.disc(cx, y + 8, 4, gold)
+    for sx in (-62, 62):
+        cv.line(cx + sx, y + 16, cx + sx - 14, y + 29, 2, gold)
+        cv.line(cx + sx, y + 16, cx + sx + 14, y + 29, 2, gold)
+        cv.poly([(cx + sx - 16, y + 29), (cx + sx + 16, y + 29),
+                 (cx + sx + 9, y + 35), (cx + sx - 9, y + 35)], gold)
+    cv.rect(cx - 18, y + h - 6, 36, 3, gold)
+
+def art_bridge(cv, x, y, w, h):
+    cv.rect(x, y, w, h, (52, 74, 94))
+    cv.rect(x, y + h - 9, w, 9, (30, 48, 66))
+    for i in range(8):
+        cv.rect(x + 20 + i * 38, y + h - 6, 14, 1.8, (110, 150, 180))
+    deck = y + 24
+    cv.rect(x + 8, deck, w - 16, 4, (16, 24, 32))
+    for tx in (70, 226):
+        cv.rect(x + tx, y + 5, 8, 23, (16, 24, 32))
+        cv.line(x + tx + 4, y + 6, x + 16, deck, 1.6, (200, 210, 220))
+        cv.line(x + tx + 4, y + 6, x + w - 16, deck, 1.6, (200, 210, 220))
+    pts = [(x + 168 + px, y + 13 + py) for px, py in _star(0, 0, 8, 3.0)]
+    cv.poly(pts, (240, 90, 50))
+
+def art_climate(cv, x, y, w, h):
+    cv.rect(x, y, w, h, (70, 120, 150))
+    cv.disc(x + 42, y + 14, 10, (246, 206, 92))
+    for cx, cy, r in ((120, 16, 9), (138, 13, 12), (158, 16, 9),
+                      (236, 18, 8), (252, 15, 10)):
+        cv.disc(x + cx, y + cy, r, (240, 244, 246))
+    cv.poly([(x + 168, y + 8), (x + 180, y + 8), (x + 180, y + 24),
+             (x + 190, y + 24), (x + 174, y + 38), (x + 158, y + 24),
+             (x + 168, y + 24)], (198, 52, 44))
+
+def art_drought(cv, x, y, w, h):
+    cv.rect(x, y, w, h, (198, 142, 62))
+    cv.disc(x + w - 58, y + 14, 11, (250, 224, 130))
+    cv.disc(x + w - 58, y + 14, 15, (222, 172, 92))
+    cv.disc(x + w - 58, y + 14, 11, (250, 224, 130))
+    cv.rect(x, y + h - 13, w, 13, (110, 74, 40))
+    for x0, zig in ((36, (0, 10, 18, 30)), (138, (0, 12, 20, 32)),
+                    (240, (0, 9, 19, 28))):
+        for i in range(3):
+            cv.line(x + x0 + zig[i], y + h - 10 + (i % 2) * 4,
+                    x + x0 + zig[i + 1], y + h - 4 - (i % 2) * 3, 1.9,
+                    (246, 226, 182))
+
+def art_columns(cv, x, y, w, h):
+    cv.rect(x, y, w, h, (96, 32, 36))
+    cream = (238, 228, 200)
+    cx = x + w / 2
+    cv.poly([(cx - 52, y + 14), (cx + 52, y + 14), (cx, y + 4)], cream)
+    for dx in (-40, -14, 12):
+        cv.rect(cx + dx, y + 17, 9, h - 24, cream)
+    cv.rect(cx - 52, y + h - 6, 104, 3, cream)
+
+def art_football(cv, x, y, w, h):
+    cv.rect(x, y, w, h, (34, 110, 52))
+    cv.rect(x + 14, y + 6, w - 28, 1.6, (235, 245, 235))
+    cv.rect(x + 14, y + h - 8, w - 28, 1.6, (235, 245, 235))
+    cv.rect(x + w / 2 - 1, y + 6, 1.6, h - 14, (235, 245, 235))
+    cv.disc(x + w / 2, y + h / 2, 10, (34, 110, 52))
+    cv.disc(x + w / 2, y + h / 2, 10.8, (235, 245, 235))
+    cv.disc(x + w / 2, y + h / 2, 9.2, (34, 110, 52))
+    bx, by = x + w - 74, y + h / 2
+    cv.disc(bx, by, 9, (245, 245, 245))
+    for dx, dy in ((0, 0), (-5, -4), (5, -4), (-4, 5), (5, 5)):
+        cv.disc(bx + dx, by + dy, 1.8, (20, 24, 28))
+
+ART = [art_skyline, art_sea, art_chart, art_scales, art_bridge,
+       art_climate, art_drought, art_columns, art_football]
+
+CARDS = [
+    ("SHENZHEN · SUMMIT", "AP", REG_ASIA,
+     "Trump, Xi and Putin hold first three-way summit",
+     "The first US-China-Russia summit, at APEC in Shenzhen, ends with a "
+     "peace declaration and a call to reform the UN."),
+    ("HORMUZ · WAR", "REUTERS", REG_MIDEAST,
+     "Iran widens war: Kuwait, Bahrain hit",
+     "Tehran answers US strikes on Qeshm Island as tankers are mined near "
+     "Hormuz; Trump warns of a dirty-bomb red line."),
+    ("NASDAQ · MARKETS", "CNBC", REG_AMERICAS,
+     "Anthropic's $81.3bn IPO smashes the record",
+     "Priced at $83 a share, the debut tops SpaceX's $75bn; trading opens "
+     "today on Nasdaq as ANT, valued near $1.5tn."),
+    ("THE HAGUE · LAW", "REUTERS", REG_EUROPE,
+     "World Court: Myanmar committed genocide",
+     "The ICJ rules Myanmar's campaign against the Rohingya was "
+     "state-sponsored genocide — a first ruling of its kind."),
+    ("CRIMEA · WAR", "AP", REG_EUROPE,
+     "Ukraine strikes the Kerch Bridge again",
+     "A third strike in four days halts rail traffic on Russia's Crimea "
+     "bridge; Putin vows a response."),
+    ("CLIMATE · TALKS", "REUTERS", REG_WORLD,
+     "COP31 split over fossil-fuel phase-out",
+     "Climate talks enter their final stage still split over phase-out "
+     "wording and finance, with Friday's close nearing."),
+    ("FIJI · DISASTER", "WIRE", REG_OCEANIA,
+     "Fiji declares disaster in El Nino drought",
+     "A national state of disaster is declared as El Nino drought grips "
+     "the Pacific islands."),
+    ("JAKARTA · LAW", "REUTERS", REG_ASIA,
+     "Indonesia can now seize crime assets",
+     "Parliament passes an asset-forfeiture law letting the state seize "
+     "crime-linked assets without a prior conviction."),
+    ("FOOTBALL · SPORT", "WIRE", REG_SPORT,
+     "Pochettino takes charge at Man United",
+     "The former Spurs boss succeeds the sacked Michael Carrick; his first "
+     "match is away at Liverpool on Sunday."),
+]
+
+ALSO = [
+    ("GAZA", "Tanks enter central Gaza past truce line"),
+    ("RIYADH", "Houthi missile damages the PIF Tower"),
+    ("MOGADISHU", "UAE envoy given 72 hours to leave Somalia"),
+    ("TOKYO", "Takaichi and Putin agree to keep talking"),
+    ("WASHINGTON", "Court asked to end migrant protections"),
+    ("DHAKA", "Opposition shutdown grips Bangladesh"),
+    ("MOSCOW", "Military plane crash kills all 19 aboard"),
+    ("BLACK SEA", "Tanker Gas Husky sinks off Bulgaria"),
+    ("GAZA AID", "Peace plan scores just 4 of 26 points"),
+    ("CEPU", "Refinery blast kills one worker in Java"),
+    ("PYONGYANG", "North Korea unveils first AI chatbot"),
+    ("LONDON", "Britain launches new renewables auction"),
+    ("DISCLOSURE", "Trump bought $265,000 of Nvidia stock"),
+    ("OIL", "Brent near $92 as Hormuz attacks bite"),
+    ("WALL ST", "S&P falls a fifth day; Dow off 1.11%"),
+    ("PANGUNA", "Rio Tinto puts $250m in mine fund"),
+    ("EMISSIONS", "Data centres: carbon up 70% by 2030"),
+    ("MANILA", "US defence loan package tops $2bn"),
+    ("FOOTBALL", "Chelsea top group, 1-0 over PSG"),
+    ("CRICKET", "England win ODI series 2-1 over Australia"),
+    ("TENNIS", "Alcaraz beats Medvedev 6-2 6-4 in Turin"),
+    ("CRICKET", "South Africa rout Bangladesh, 9 wickets"),
+    ("TENNIS", "Barty for the Hall of Fame"),
+    ("RANKINGS", "Morocco up to record fifth in world"),
+]
+
+def draw_card(cv, x, y, w, h, idx):
+    cat, src, col, head, summ = CARDS[idx]
+    cv.rect(x, y, w, h, HAIR)
+    cv.rect(x + 1, y + 1, w - 2, h - 2, CARD)
+    ART[idx](cv, x + 1, y + 1, w - 2, 43)
+    cv.disc(x + 17, y + 59, 9.5, col)
+    draw_text(cv, x + 17, y + 63.5, str(idx + 1), 12, WHITE, 'bold',
+              align='center')
+    draw_text(cv, x + 33, y + 63.5, cat, 10.5, col, 'bold', tracking=0.7)
+    draw_text(cv, x + w - 11, y + 63.5, src, 9.5, GREY, 'bold',
+              tracking=0.5, align='right')
+    last = draw_block(cv, x + 11, y + 70, head, 19.5, INK, 'bold',
+                      w - 22, 23.5)
+    draw_block(cv, x + 11, last + 8, summ, 12, INK2, 'reg', w - 22, 15.2)
+
+def draw_also_item(cv, x, y_top, label, text, colw):
+    """One ALSO one-liner: red bold label, then body words, wrapped as one
+    token flow across the full column width. Returns y below the item."""
+    size, lh = 10.2, 12.0
+    space_w = 2.4 * size / 7.0
+    tokens = [(label, 'bold', RED)]
+    tokens += [(wd, 'reg', INK2) for wd in text.split()]
+    lines = [[]]
+    cur_w = 0.0
+    for tok in tokens:
+        tw = text_width(tok[0], size, tok[1])
+        add = tw if not lines[-1] else tw + space_w
+        if lines[-1] and cur_w + add > colw:
+            lines.append([tok])
+            cur_w = tw
+        else:
+            lines[-1].append(tok)
+            cur_w += add
+    for i, line in enumerate(lines):
+        lx = x
+        yb = y_top + size + i * lh
+        for wd, wt, col in line:
+            draw_text(cv, lx, yb, wd, size, col, wt)
+            lx += text_width(wd, size, wt) + space_w
+    return y_top + size + (len(lines) - 1) * lh + 3.5
 
 def render():
     cv = Canvas()
     cv.rect(0, 0, W, H, PAPER)
 
-    # ---- folio line ------------------------------------------------------
-    draw_text(cv, M, 13, "VOL. I · No. 19", 11.5, INK_SOFT)
-    draw_text(cv, W - M, 13, "DRAWN ENTIRELY IN CODE · NO PHOTOGRAPHS", 11.5,
-              INK_SOFT, align="right")
-    hrule(cv, M, 33, CW, 1.4, INK)
+    # ---- utility bar -----------------------------------------------------
+    cv.rect(0, 0, W, 26, INK)
+    draw_text(cv, 16, 18, "THE WORLD TODAY", 11, WHITE, 'bold',
+              tracking=1.5)
+    draw_text(cv, W - 16, 18, "33 STORIES · 7 GROUPS · ONE PAGE", 11,
+              WHITE, 'bold', tracking=1.5, align='right')
 
     # ---- masthead ---------------------------------------------------------
-    draw_text(cv, W / 2, 44, "THE WORLD TODAY", 84, INK, weight=1.5,
-              tracking=1.0, align="center")
-    hrule(cv, M, 142, CW, 5, INK)
-    hrule(cv, M, 150, CW, 1.6, INK)
+    cv.rect(MX, 36, 96, 84, RED)
+    draw_text(cv, MX + 48, 53, "NOV", 12, WHITE, 'bold', tracking=2,
+              align='center')
+    draw_text(cv, MX + 48, 94, "19", 38, WHITE, 'disp', align='center')
+    draw_text(cv, MX + 48, 113, "WED 2026", 10, WHITE, 'bold',
+              tracking=1.5, align='center')
+    draw_text(cv, 124, 108, "The World Today", 74, INK, 'disp')
+    # right info box
+    bx, bw = 836, 176
+    cv.rect(bx, 40, bw, 76, HAIR)
+    cv.rect(bx + 1, 41, bw - 2, 74, CARD)
+    draw_text(cv, bx + bw / 2, 66, "WEDNESDAY", 13, INK, 'bold',
+              tracking=1, align='center')
+    draw_text(cv, bx + bw / 2, 86, "19 NOVEMBER 2026", 13, INK, 'bold',
+              tracking=0.5, align='center')
+    draw_text(cv, bx + bw / 2, 106, "VOL. I — NO. 19", 11, GREY, 'reg',
+              align='center')
+    hline(cv, MX, 128, CW, INK, 3)
+    hline(cv, MX, 134, CW, INK, 1)
 
-    # ---- date bar ---------------------------------------------------------
-    cv.rect(M, 160, CW, 40, INK)
-    draw_text(cv, W / 2, 169, "WEDNESDAY 19 NOVEMBER 2026", 27, WHITE,
-              weight=1.35, tracking=2.2, align="center")
+    # ---- strap line -------------------------------------------------------
+    draw_text(cv, W / 2, 160,
+              "Three-way summit in Shenzhen · War widens in the Gulf · "
+              "A genocide verdict · The biggest IPO ever",
+              15, INK, 'reg', align='center')
 
-    # ---- market ticker ----------------------------------------------------
-    tick = ("MARKETS  BRENT $92.25 \u25b2 0.3% · WTI $83.46 · GOLD $3,740 \u25bc · "
-            "S&P 500 7,324 \u25bc 0.2% · NASDAQ 24,430 \u25b2 0.4% · DOW 50,198 \u25bc 1.1%")
-    draw_text(cv, W / 2, 212, tick, 14.5, INK, weight=1.05, align="center")
-    hrule(cv, M, 236, CW, 1.4, INK)
+    # ---- region tally chips ----------------------------------------------
+    chips = [("EUROPE 8", REG_EUROPE), ("AMERICAS 4", REG_AMERICAS),
+             ("ASIA-PACIFIC 7", REG_ASIA), ("MIDDLE EAST 4", REG_MIDEAST),
+             ("AFRICA 3", REG_AFRICA), ("OCEANIA 4", REG_OCEANIA),
+             ("WORLD 3", REG_WORLD)]
+    widths = [text_width(t, 11.5, 'bold', 0.5) + 20 for t, _ in chips]
+    gap = (CW - sum(widths)) / (len(chips) - 1)
+    cx = MX
+    for (label, col), cwd in zip(chips, widths):
+        cv.rect(cx, 172, cwd, 24, col)
+        draw_text(cv, cx + cwd / 2, 189, label, 11.5, WHITE, 'bold',
+                  tracking=0.5, align='center')
+        cx += cwd + gap
 
-    # ---- lead story (left) -------------------------------------------------
-    LX, LW = M, 604
-    y = 252
-    draw_text(cv, LX, y, "SHENZHEN · APEC · DIPLOMACY", 14.5, RED, weight=1.3, tracking=1.6)
-    y += 25
-    y += draw_wrapped(cv, LX, y, "TRUMP, XI AND PUTIN HOLD FIRST THREE-WAY SUMMIT",
-                      47, INK, LW, leading=1.16, weight=1.45)
-    y += 5
-    y += draw_wrapped(cv, LX, y,
-                      "The leaders of the United States, China and Russia sit down "
-                      "together in Shenzhen — a first in modern diplomacy — and "
-                      "announce a \u201cpeace declaration\u201d.",
-                      16.5, INK_SOFT, LW, leading=1.3, weight=0.95)
-    y += 7
-    y += draw_wrapped(cv, LX, y,
-                      "JOINT STATEMENT PROMISES U.N. REFORM AND NUCLEAR TALKS — "
-                      "UKRAINE, IRAN AND HORMUZ OIL ON THE TABLE",
-                      15.5, INK, LW, leading=1.26, weight=1.2)
-    y += 14
-    map_h = draw_map(cv, LX + 2, y, 252)
-    cap_h = draw_wrapped(cv, LX + 272, y + 2,
-                         "THE DAY AT A GLANCE — RED DOTS MARK TODAY'S FRONT "
-                         "PAGE, FROM SHENZHEN TO HOBART",
-                         12.5, GREY, LW - 272, leading=1.3, weight=1.0)
-    draw_wrapped(cv, LX + 272, y + 2 + cap_h + 8,
-                 "INSIDE: WAR IN THE GULF · A GENOCIDE VERDICT · "
-                 "THE BIGGEST IPO IN HISTORY",
-                 12.5, GREY, LW - 272, leading=1.3, weight=1.0)
+    # ---- stat band ---------------------------------------------------------
+    hline(cv, MX, 208, CW, HAIR, 1)
+    stats = [("$81.3bn", "raised by Anthropic — the largest IPO on record"),
+             ("589m", "children lived in war zones in 2025, a record"),
+             ("109-0", "Denmark's vote to back the Greenland pact"),
+             ("$250m", "Rio Tinto fund for Panguna mine harm in PNG")]
+    for i, (num, cap) in enumerate(stats):
+        sx = MX + i * 250
+        if i:
+            cv.rect(sx - 8, 216, 1, 48, HAIR)
+        draw_text(cv, sx + 6, 240, num, 27, RED, 'bold')
+        draw_block(cv, sx + 6, 246, cap, 11, INK2, 'reg', 224, 13.5)
+    hline(cv, MX, 274, CW, HAIR, 1)
 
-    # ---- right rail ---------------------------------------------------------
-    RX, RW = 662, W - M - 662
-    ry = 252
-    cv.rect(RX, ry, RW, 178, PANEL)
-    draw_text(cv, RX + 14, ry + 11, "THE DAY IN NUMBERS", 15.5, RED, weight=1.3, tracking=1.2)
-    stats = [
-        ("$81.3bn", "ANTHROPIC'S IPO — THE LARGEST EVER RAISED"),
-        ("109–0", "DENMARK'S VOTE FOR THE GREENLAND PACT"),
-        ("589m", "CHILDREN LIVING IN WAR ZONES — A RECORD"),
-        ("72 hrs", "GIVEN TO THE UAE ENVOY TO QUIT SOMALIA"),
-    ]
-    sy = ry + 40
-    for num, lab in stats:
-        draw_text(cv, RX + 14, sy, num, 23, INK, weight=1.4)
-        draw_wrapped(cv, RX + 112, sy + 2, lab, 11, INK_SOFT, RW - 124,
-                     leading=1.2, weight=1.0)
-        sy += 34.5
-    ry += 192
-    draw_text(cv, RX, ry, "BUSINESS · NEW YORK", 13, RED, weight=1.25, tracking=1.2)
-    ry += 21
-    ry += draw_wrapped(cv, RX, ry, "ANTHROPIC'S $81bn IPO SMASHES THE RECORD",
-                       23.5, INK, RW, leading=1.18, weight=1.35)
-    ry += 2
-    ry += draw_wrapped(cv, RX, ry,
-                       "Priced at $83 a share, the AI firm's offering tops "
-                       "SpaceX's $75bn. Trading opens today on Nasdaq as ANT.",
-                       13.5, INK_SOFT, RW, leading=1.27, weight=0.95)
-    ry += 7
-    bx, bw = RX + 2, RW - 88
-    draw_text(cv, bx, ry, "SPACEX, JUN", 10, GREY)
-    cv.rect(bx, ry + 14, bw * 75 / 81.3, 10, GREY)
-    draw_text(cv, bx + bw * 75 / 81.3 + 7, ry + 13, "$75bn", 11, INK_SOFT, weight=1.1)
-    draw_text(cv, bx, ry + 31, "ANTHROPIC", 10, RED, weight=1.1)
-    cv.rect(bx, ry + 45, bw, 10, RED)
-    draw_text(cv, bx + bw + 7, ry + 44, "$81.3bn", 11, RED, weight=1.15)
+    # ---- story cards -------------------------------------------------------
+    cw3 = (CW - 16) / 3
+    for i in range(9):
+        cxp = MX + (i % 3) * (cw3 + 8)
+        cyp = 284 + (i // 3) * 174
+        draw_card(cv, cxp, cyp, cw3, 168, i)
 
-    # ---- lower columns -------------------------------------------------------
-    hrule(cv, M, 646, CW, 2.2, INK)
-    gcol_w = (CW - 2 * 22) / 3
-    gy = 660
-    for vx in (M + gcol_w + 11, M + 2 * gcol_w + 33):
-        cv.rect(vx, gy + 2, 0.9, 272, RULE)
+    # ---- ALSO strip ---------------------------------------------------------
+    hline(cv, MX, 806, CW, INK, 1.6)
+    draw_text(cv, MX, 824, "ALSO ON WEDNESDAY 19 NOVEMBER", 13, INK,
+              'bold', tracking=1)
+    aw = text_width("ALSO ON WEDNESDAY 19 NOVEMBER", 13, 'bold', 1)
+    draw_text(cv, MX + aw + 10, 824, "— 24 MORE STORIES", 13, RED, 'bold',
+              tracking=1)
+    colw = (CW - 5 * 13) / 6
+    for c in range(6):
+        yy = 832
+        for it in ALSO[c * 4:(c + 1) * 4]:
+            yy = draw_also_item(cv, MX + c * (colw + 13), yy, it[0], it[1],
+                                colw)
 
-    # Column 1 — war & the court
-    cx = M
-    yy = gy
-    draw_text(cv, cx, yy, "MIDDLE EAST", 12, RED, weight=1.25, tracking=1.3)
-    yy += 15
-    yy += story(cv, cx, yy, gcol_w, "IRAN WIDENS THE WAR: KUWAIT, BAHRAIN STRUCK",
-                "Tehran answers U.S. strikes on Qeshm Island as tankers "
-                "are mined near Hormuz.")
-    yy += 5.5
-    hrule(cv, cx, yy, gcol_w, 0.9, RULE); yy += 8
-    draw_text(cv, cx, yy, "THE HAGUE", 12, RED, weight=1.25, tracking=1.3)
-    yy += 15
-    yy += story(cv, cx, yy, gcol_w, "WORLD COURT: MYANMAR COMMITTED GENOCIDE",
-                "The ICJ rules the Rohingya campaign was genocide by "
-                "the state — a first of its kind.")
-    yy += 5.5
-    hrule(cv, cx, yy, gcol_w, 0.9, RULE); yy += 8
-    yy += brief(cv, cx, yy, gcol_w,
-                "SOMALIA ORDERS UAE AMBASSADOR OUT IN 72 HOURS, CITING \u201cINVASION\u201d",
-                size=12.5)
-    yy += 5.5
-    hrule(cv, cx, yy, gcol_w, 0.9, RULE); yy += 7
-    yy += brief(cv, cx, yy, gcol_w,
-                "BANGLADESH GRIPPED BY NATIONWIDE OPPOSITION SHUTDOWN", size=12.5)
-
-    # Column 2 — Ukraine, Gaza, the Gulf
-    cx = M + gcol_w + 22
-    yy = gy
-    draw_text(cv, cx, yy, "UKRAINE", 12, RED, weight=1.25, tracking=1.3)
-    yy += 15
-    yy += story(cv, cx, yy, gcol_w, "KYIV HITS KERCH BRIDGE FOR A THIRD TIME",
-                "Rail traffic halted on Russia's Crimea bridge — "
-                "third strike in four days.")
-    yy += 5.5
-    hrule(cv, cx, yy, gcol_w, 0.9, RULE); yy += 8
-    draw_text(cv, cx, yy, "SAUDI ARABIA", 12, RED, weight=1.25, tracking=1.3)
-    yy += 15
-    yy += story(cv, cx, yy, gcol_w, "HOUTHI MISSILE DAMAGES RIYADH'S PIF TOWER",
-                "The Saudi wealth fund's tower is damaged in an "
-                "apparent Houthi missile attack.")
-    yy += 5.5
-    hrule(cv, cx, yy, gcol_w, 0.9, RULE); yy += 8
-    yy += brief(cv, cx, yy, gcol_w,
-                "ISRAELI TANKS PUSH INTO CENTRAL GAZA BEYOND CEASEFIRE LINE",
-                size=12.5)
-    yy += 5.5
-    hrule(cv, cx, yy, gcol_w, 0.9, RULE); yy += 7
-    yy += brief(cv, cx, yy, gcol_w,
-                "LPG TANKER GAS HUSKY SINKS OFF BULGARIA AFTER PROJECTILE STRIKES",
-                size=12.5)
-
-    # Column 3 — planet, Asia-Pacific, economy briefs
-    cx = M + 2 * (gcol_w + 22)
-    yy = section_head(cv, cx, gy, gcol_w, "PLANET · ASIA · MONEY")
-    yy += 9
-    col3 = [
-        "COP31 TALKS ENTER FINAL STAGE, SPLIT OVER FOSSIL-FUEL WORDS",
-        "FIJI DECLARES NATIONAL DISASTER OVER EL NIÑO DROUGHT",
-        "RIO TINTO PUTS $250M INTO PANGUNA MINE LEGACY FUND",
-        "INDONESIA PASSES LAW TO SEIZE CRIME ASSETS WITHOUT A CONVICTION",
-        "NORTH KOREA UNVEILS ITS FIRST AI CHATBOT, \u201cFOUNTAIN OF WISDOM\u201d",
-        "OIL STEADIES NEAR $92 AS HORMUZ ATTACKS OFFSET SURPLUS",
-        "DISCLOSURE: TRUMP BOUGHT UP TO $265,000 OF NVIDIA STOCK",
-    ]
-    for j, it in enumerate(col3):
-        hh = brief(cv, cx, yy, gcol_w, it, size=12.5)
-        yy += hh + 7
-        if j < len(col3) - 1:
-            hrule(cv, cx, yy - 3.5, gcol_w, 0.8, RULE)
-
-    # ---- sport strip -----------------------------------------------------------
-    sy = 946
-    hrule(cv, M, sy, CW, 2.2, INK)
-    draw_text(cv, M, sy + 9, "SPORT", 15, RED, weight=1.35, tracking=1.5)
-    draw_text(cv, M + 76, sy + 10.5,
-              "POCHETTINO STARTS AT MANCHESTER UNITED · ALCARAZ BEATS MEDVEDEV 6-2 6-4 · "
-              "ENGLAND WIN ODI SERIES 2-1", 13, INK, weight=1.05)
-    draw_text(cv, M + 76, sy + 29,
-              "CHELSEA TOP GROUP, 1-0 OVER PSG · SOUTH AFRICA BEAT BANGLADESH BY NINE WICKETS · "
-              "BARTY FOR HALL OF FAME", 13, INK, weight=1.05)
-
-    # ---- footer ------------------------------------------------------------------
-    draw_text(cv, W / 2, 1004,
-              "SOURCES: REUTERS · ASSOCIATED PRESS · JUST SECURITY · SAVE THE CHILDREN · 38 NORTH · FIFA",
-              10.5, GREY, align="center")
+    # ---- footer --------------------------------------------------------------
+    cv.rect(MX, 958, CW, 32, RED)
+    cv.rect(MX + 1.5, 959.5, CW - 3, 29, CARD)
+    draw_text(cv, MX + 12, 979, "DATE CHECK", 11, RED, 'bold',
+              tracking=0.8)
+    dw = text_width("DATE CHECK", 11, 'bold', 0.8)
+    draw_text(cv, MX + 12 + dw + 8, 979,
+              "Every story here was reported on Wednesday 19 November 2026 "
+              "— nothing carried over from earlier days.",
+              11, INK2, 'reg')
+    draw_text(cv, MX + 12, 1013,
+              "Sources: Reuters · Associated Press · Just Security · "
+              "Save the Children · 38 North · FIFA",
+              9.5, GREY, 'reg')
+    draw_text(cv, W - MX, 1013, "DRAWN ENTIRELY IN CODE · NO PHOTOGRAPHS",
+              9.5, GREY, 'bold', tracking=0.8, align='right')
 
     return cv.downsample()
 
