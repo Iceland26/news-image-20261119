@@ -297,6 +297,17 @@ def _band(cx, cy, rx, ry, bv, bh, a0, a1):
     return [_O(_join(outer, inner))]
 
 
+def _arcstroke(cx, cy, rx, ry, w, a0, a1):
+    """One contour: a stroked elliptical arc — outer edge sampled
+    CCW from a0 to a1, flat cap, inner edge back. Unlike _band (two
+    arcs joined into a ring segment), the caps here are radial, so
+    the ends meet other parts without a pointed beak."""
+    wy = w * ry / rx if rx else w
+    outer = _arc(cx, cy, rx + w / 2.0, ry + wy / 2.0, a0, a1)
+    inner = _arc(cx, cy, rx - w / 2.0, ry - wy / 2.0, a1, a0)
+    return [_O(_join(outer, inner))]
+
+
 def _diag(x0, y0, x1, y1, w):
     """Straight stroke between two points, flat perpendicular caps."""
     dx, dy = x1 - x0, y1 - y0
@@ -783,7 +794,12 @@ def _gz(P):
 
 
 def _g0(P):
-    return 520, _bowl(260, 340, 185, 352, P)
+    """Tabular figures: every digit shares advance 520 and body
+    60..460. Round forms overshoot to -12..692; flat forms sit on
+    0..680. Strokes are explicit (BV*0.82 sides / BH top-bottom) so
+    bold counters stay open instead of collapsing under _bowl's
+    clamp."""
+    return 520, _band(260, 340, 195, 352, P['BV'] * 0.82, P['BH'], 0, 360)
 
 
 def _g1(P):
@@ -793,20 +809,29 @@ def _g1(P):
 
 
 def _g2(P):
-    cs = _band(258, 470, 185, 195, P['BV'] * 0.55, P['BH'], -21, 205)
-    cs += _diag(138, 428, 405, 28, P['S'] * 0.66)
-    cs.append(_rect(70, 0, 452, P['T']))
+    """Dome + STEEP diagonal from the dome's right end down to the
+    base's left end + flat base. (v3's diagonal slanted the wrong
+    way — upper-left to lower-right — and the glyph read as a
+    reversed S at every size.)"""
+    cs = _band(258, 500, 172, 192, P['BV'] * 0.80, P['BH'] * 1.05,
+               -28, 200)
+    cs += _diag(396, 408, 112, 24, P['S'] * 0.92)
+    cs.append(_rect(64, 0, 456, P['T']))
     if P['SER']:
-        cs.append(_rect(452 - P['SH'], 0, 452, P['T'] + 30))
+        cs.append(_rect(456 - P['SH'], 0, 456, P['T'] + 30))
     return 520, cs
 
 
 def _g3(P):
-    cs = _band(255, 490, 175, 185, P['BV'], P['BH'], -95, 180)
-    cs += _diag(95, 480, 215, 350, P['BV'] * 0.8)
-    cs += _band(255, 185, 190, 197, P['BV'], P['BH'], 180, 460)
+    """Two bowls joined by a real waist wedge on the right (v3's
+    diagonal wedge pinched the waist shut at small sizes)."""
+    cs = _band(262, 500, 168, 188, P['BV'] * 0.80, P['BH'] * 1.05,
+               -78, 172)
+    cs += _band(262, 188, 184, 196, P['BV'] * 0.80, P['BH'] * 1.05,
+                168, 442)
+    cs.append(_O([(245, 295), (352, 310), (352, 405), (245, 390)]))
     if P['SER']:
-        cs.append(_rect(66, 462, 128, 462 + P['T'] * 0.8))
+        cs.append(_rect(88, 500, 152, 500 + P['T'] * 0.85))
     return 520, cs
 
 
@@ -818,15 +843,18 @@ def _g4(P):
 
 
 def _g5(P):
+    """Top bar + stem + waist bar + a full belly bowl whose top arc
+    hides behind the waist bar, so the belly emerges from under the
+    bar on both sides. (Open-arc bellies kept failing: started high
+    they enclosed an upper counter like an epsilon; started low the
+    terminal floated and the bowl read as a C.)"""
     sx = _sx(P)
-    cs = [_rect(sx - P['S'] / 2, CAPU - P['T'], 440, CAPU)]
+    cs = [_rect(sx - P['S'] / 2, CAPU - P['T'], 448, CAPU)]
     if P['SER']:
-        cs.append(_rect(440 - P['SH'], CAPU - P['T'] - 30, 440, CAPU))
-    cs += _stem(sx, 330, CAPU, P, top=False, bot=False)
-    mb = 330 + P['T'] * 0.38
-    cs.append(_rect(sx - P['S'] / 2, mb - P['T'] * 0.38, 362,
-                    mb + P['T'] * 0.38))
-    cs += _band(268, 196, 202, 182, P['BV'] * 0.62, P['BH'], 100, 385)
+        cs.append(_rect(448 - P['SH'], CAPU - P['T'] - 30, 448, CAPU))
+    cs += _stem(sx, 318, CAPU, P, top=False, bot=False)
+    cs.append(_rect(sx - P['S'] / 2, 322, 420, 322 + P['T'] * 0.85))
+    cs += _band(258, 185, 198, 175, P['BV'] * 0.82, P['BH'], 80, 365)
     return 520, cs
 
 
@@ -930,9 +958,9 @@ def _gdollar(P):
 
 
 def _gpercent(P):
-    cs = _bowl(140, 520, 105, 115, P)
-    cs += _bowl(610, 180, 105, 115, P)
-    cs += _diag(640, 700, 110, 0, 60)
+    cs = _band(140, 520, 112, 122, P['BV'] * 0.7, P['BH'] * 0.8, 0, 360)
+    cs += _band(610, 180, 112, 122, P['BV'] * 0.7, P['BH'] * 0.8, 0, 360)
+    cs += _diag(640, 700, 110, 0, P['S'] * 0.62)
     return 750, cs
 
 
@@ -1003,13 +1031,16 @@ def _gellip(P):
 
 
 def _gpound(P):
-    sx = _sx(P)
-    cs = _stem(sx, 0, 545, P, top=False, bot=True)
-    cs += _band(238, 545, 92, 108, P['BV'] * 0.8, P['BH'] * 0.8, -20, 180)
-    cs.append(_rect(88, 318, 402, 318 + P['T']))
-    cs.append(_rect(sx - P['S'] / 2, 0, 472, P['T']))
+    """A real pound sign: a wide curved top hook (like a C) over a
+    stem, a crossbar through the stem, and an L foot with an
+    upturned end. (v3's hook was a tiny arc buried in the stem and
+    the long flat foot made the glyph read as a barred L.)"""
+    cs = _band(250, 520, 130, 150, P['BV'] * 0.75, P['BH'], -30, 190)
+    cs += _stem(165, 0, 520, P, top=False, bot=False)
+    cs.append(_rect(92, 300, 400, 300 + P['T'] * 0.92))
+    cs.append(_rect(165 - P['S'] / 2, 0, 430, P['T']))
     if P['SER']:
-        cs.append(_rect(472 - P['SH'], 0, 472, P['T'] + 30))
+        cs.append(_rect(430 - P['SH'], 0, 430, P['T'] + 36))
     return 540, cs
 
 
