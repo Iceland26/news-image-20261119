@@ -843,18 +843,17 @@ def _g4(P):
 
 
 def _g5(P):
-    """Top bar + stem + waist bar + a full belly bowl whose top arc
-    hides behind the waist bar, so the belly emerges from under the
-    bar on both sides. (Open-arc bellies kept failing: started high
-    they enclosed an upper counter like an epsilon; started low the
-    terminal floated and the bowl read as a C.)"""
+    """Top bar + stem + the belly as one stroked circular hook whose
+    top end tucks into the stem's foot: no waist bar at all. (Every
+    barred construction read as a reversed epsilon at text sizes —
+    bar and belly stacked to the same right edge is an E silhouette.
+    The hook's upper right stays open, which is what makes it a 5.)"""
     sx = _sx(P)
     cs = [_rect(sx - P['S'] / 2, CAPU - P['T'], 448, CAPU)]
     if P['SER']:
         cs.append(_rect(448 - P['SH'], CAPU - P['T'] - 30, 448, CAPU))
-    cs += _stem(sx, 318, CAPU, P, top=False, bot=False)
-    cs.append(_rect(sx - P['S'] / 2, 322, 420, 322 + P['T'] * 0.85))
-    cs += _band(258, 185, 198, 175, P['BV'] * 0.82, P['BH'], 80, 365)
+    cs += _stem(sx, 300, CAPU, P, top=False, bot=False)
+    cs += _arcstroke(265, 195, 142, 142, P['BV'] * 0.85, 130, 385)
     return 520, cs
 
 
