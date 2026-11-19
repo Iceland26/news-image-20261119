@@ -25,7 +25,7 @@ import struct
 import zlib
 
 W, H = 1024, 1024
-SS = 2                      # supersampling factor
+SS = 4                      # supersampling factor
 SW, SH = W * SS, H * SS
 
 # --------------------------------------------------------------------------
@@ -111,14 +111,18 @@ class Canvas:
         """Box-average the supersampled buffer to W x H."""
         out = bytearray(W * H * 3)
         b = self.buf
+        n = SS * SS
         for y in range(H):
             for x in range(W):
-                i = ((y * SS) * SW + x * SS) * 3
                 o = (y * W + x) * 3
+                base = ((y * SS) * SW + x * SS) * 3
                 for c in range(3):
-                    s = (b[i + c] + b[i + 3 + c]
-                         + b[i + SW * 3 + c] + b[i + SW * 3 + 3 + c])
-                    out[o + c] = s >> 2
+                    s = 0
+                    for dy in range(SS):
+                        i = base + dy * SW * 3 + c
+                        for dx in range(SS):
+                            s += b[i + dx * 3]
+                    out[o + c] = s // n
         return bytes(out)
 
 # --------------------------------------------------------------------------
@@ -131,8 +135,9 @@ class Canvas:
 # (heavy verticals, light horizontals) in the serif cuts. Contours are
 # wound CCW for outers and CW for counters (y-up); a nonzero-winding
 # scanline rasteriser fills them, so overlapping parts union and
-# counters cut out. Three cuts share one set of glyph builders, driven
-# by face parameters:
+# counters cut out. v4 (foundry pass): digits and symbols rebuilt as
+# explicit measured outlines, tabular figures, 4x supersampling.
+# Three cuts share one set of glyph builders, driven by face parameters:
 #   'disp'  serif display — masthead, big numerals
 #   'bold'  serif bold    — headlines, labels, stat figures
 #   'reg'   sans          — body text
